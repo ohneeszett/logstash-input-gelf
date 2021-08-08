@@ -73,10 +73,10 @@ class LogStash::Inputs::Gelf < LogStash::Inputs::Base
   def run(output_queue)
     begin
       if @use_tcp
-        @tcp_thr = Thread.new(output_queue) { |output_queue| tcp_listener(output_queue) }
+        @tcp_thr = Thread.new(output_queue) { |output_queue| tcp_listener(output_queue) rescue log_and_squash }
       end
       if @use_udp
-        @udp_thr = Thread.new(output_queue) { |output_queue| udp_listener(output_queue) }
+        @udp_thr = Thread.new(output_queue) { |output_queue| udp_listener(output_queue) rescue log_and_squash  }
       end
     rescue => e
       unless stop?
@@ -138,10 +138,10 @@ class LogStash::Inputs::Gelf < LogStash::Inputs::Base
               end
             end
 
-             if data_in.nil?
+            if data_in.nil?
               @logger.debug("Gelf (tcp): socket read succeeded, but data is nil. Skipping.")
               next
-             end
+            end
 
             # data received.  Remove trailing \0
             data_in[-1] == "\u0000" && data_in = data_in[0...-1]
@@ -267,11 +267,29 @@ class LogStash::Inputs::Gelf < LogStash::Inputs::Base
   end
 
   def strip_leading_underscore(event)
-     # Map all '_foo' fields to simply 'foo'
-     event.to_hash.keys.each do |key|
-       next unless key[0,1] == "_"
-       event.set(key[1..-1], event.get(key))
-       event.remove(key)
-     end
+    # Map all '_foo' fields to simply 'foo'
+    event.to_hash.keys.each do |key|
+      next unless key[0,1] == "_"
+      event.set(key[1..-1], event.get(key))
+      event.remove(key)
+    end
   end
+
+  # Helper for inline rescues, which logs the squashed exception at "TRACE" level
+  # and returns nil.
+  #
+  # Instead of:
+  # ~~~ ruby
+  #.  foo rescue nil
+  # ~~~
+  # Do:
+  # ~~~ ruby
+  #.  foo rescue log_and_squash
+  # ~~~
+  def log_and_squash
+    $! && logger.trace("SQUASHED EXCEPTION: `#{$!.message}` at (`#{caller.first}`)")
+    nil
+  end
+
+
 end
